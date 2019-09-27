@@ -1,0 +1,438 @@
+#!/bin/bash
+VERSION='v1.0.0'
+BLUE_COLOR_START="\033[1;36m"
+BLUE_COLOR_END="\033[0m"
+
+add_config()
+{
+  if [ -z "$2" ];then
+    return 0
+  fi
+
+  if [ -f $HOME/.gmr.config ]; then
+      content=`cat $HOME/.gmr.config| grep $1`
+      if [ -n "$content" ];then
+        sed -i "" "/^$1/d" $HOME/.gmr.config
+      fi
+      echo "$1=$2" >> $HOME/.gmr.config
+  else
+    touch $HOME/.gmr.config
+    echo "$1=$2" >> $HOME/.gmr.config
+  fi
+  echo -e "set config of $1=${BLUE_COLOR_START}$2${BLUE_COLOR_END}"
+
+  init_config
+}
+
+create_merge_reqeust()
+{
+  mr_branch=${mr_branch:=`git.branch`}
+  mr_squash=${mr_squash:="true"}
+  mr_lable=${mr_lable:="engineering"}
+  mr_project=${mr_project:="$GITLAB_PROJECT_ID"}
+  mr_useid=${mr_useid:="$GITLAB_USER_ID"}
+
+  check_data
+
+  echo -e "merge project id =${BLUE_COLOR_START} $mr_project ${BLUE_COLOR_END}"
+  echo -e "merge title =${BLUE_COLOR_START} $mr_title ${BLUE_COLOR_END}"
+  echo -e "merge branch =${BLUE_COLOR_START} $mr_branch ${BLUE_COLOR_END}"
+  echo -e "merge labels =${BLUE_COLOR_START} $mr_lable ${BLUE_COLOR_END}"
+  echo -e "squash =${BLUE_COLOR_START} $mr_squash ${BLUE_COLOR_END}"
+  local data='{
+                "id":'$mr_project',
+                "target_branch":"master",
+                "source_branch":"'$mr_branch'",
+                "title":"'$mr_title'",
+                "assignee_id":'$mr_useid',
+                "labels":"'$mr_lable',script",
+                "remove_source_branch":false,
+                "squash":'$mr_squash'
+              }'
+  echo "request data: $data"
+  echo ""
+  local result=`curl --request POST --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+    --header "Content-Type: application/json" \
+    --data "$data" \
+    $GITLAB_HOST/api/v4/projects/$mr_project/merge_requests`
+  local mr_path=`echo "$result" | jq '.web_url'`
+  if [ "$mr_path" == "null" ] || [ -z "$mr_path" ];then
+    echo "$result"
+    if [ -z "$mr_path" ];then
+      echo -e "Have you install jq? Maybe you need use ${BLUE_COLOR_START}brew install jq${BLUE_COLOR_END}"
+    fi
+  else
+    echo -e "${BLUE_COLOR_START}You can click it to view the MR:${BLUE_COLOR_END}$mr_path"
+    local mr_pipline=`echo "$result" | jq '.pipeline.id'`
+    echo "mr_pipline =$mr_pipline"
+    if [ "$mr_pipline" != "null" ];then 
+      start_pipline $mr_pipline
+    fi
+  fi
+}
+
+start_pipline_with_branch() {
+  echo "start_pipline_with_branch branch = $1"
+  mr_project=${mr_project:="$GITLAB_PROJECT_ID"}
+  local piplines=`curl --request GET --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+    --header "Content-Type: application/json" \
+    $GITLAB_HOST/api/v4/projects/$mr_project/pipelines?scope=manual&ref=$1`
+  local manual_pipline=`echo "$piplines" | jq '.[0].id'`
+  if [ "$manual_pipline" != "null" ] && [ -n "$manual_pipline" ];then
+    echo -e "start play pipline: $manual_pipline in $BLUE_COLOR_START $1 $BLUE_COLOR_END branch "
+    start_pipline $manual_pipline
+  else
+    echo -e "there are no manual pipline in the $BLUE_COLOR_START $1 $BLUE_COLOR_END branch"
+  fi
+}
+
+start_pipline() {
+  echo "start pipline with $1"
+  mr_project=${mr_project:="$GITLAB_PROJECT_ID"}
+  local jobs=`curl --request GET --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+    --header "Content-Type: application/json" \
+    $GITLAB_HOST/api/v4/projects/$mr_project/pipelines/$1/jobs?scope=manual`
+  local manual_job=`echo "$jobs" | jq '.[0].id'`
+  if [ "$manual_job" != "null" ];then
+    play_job $manual_job
+  fi
+}
+
+play_job() {
+  curl --request POST --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+    --header "Content-Type: application/json" \
+    $GITLAB_HOST/api/v4/projects/$mr_project/jobs/$1/play
+}
+
+git.branch() 
+{
+  br=`git branch | grep "*"`
+  echo ${br/* /}
+}
+
+git.title()
+{
+  local all_commit=`git log $mr_branch ^origin/master --format="%s"`
+  local title=`echo "$all_commit" | awk 'END {print}'`
+  echo $title
+}
+
+init_config()
+{
+  if [ ! -f $HOME/.gmr.config ];then
+    touch $HOME/.gmr.config
+    add_config GITLAB_PROJECT_ID "341"
+  fi
+
+  while read line;do
+    eval "$line"
+  done < $HOME/.gmr.config
+}
+
+check_config() 
+{
+  if [ -z "$GITLAB_HOST" ]; then 
+    echo "gitlab host is empty" 
+    read -p "Please input gitlab host:" host
+    add_config GITLAB_HOST $host
+  fi
+
+  if [ -z "$GITLAB_TOKEN" ]; then 
+    echo "gitlab token is empty" 
+    read -p "Please input gitlab token:" token
+    add_config GITLAB_TOKEN $token
+  fi
+
+  if [ -z "$GITLAB_USER_ID" ]; then 
+    echo "gitlab user id is empty" 
+    read -p "Please input gitlab user_id:" user_id
+    add_config GITLAB_USER_ID $user_id
+  fi
+
+  if [ -z "$DART_ANALYZER" ]; then 
+    echo "dart analyzer is not def"
+    read -p "Please input dartanalyzer path:" path 
+    add_config DART_ANALYZER $path
+  fi
+}
+
+check_data()
+{
+  while true;do
+    local default_title=`git.title`
+    echo -e "Do you agree with use the default merge request title?: ${BLUE_COLOR_START}$default_title${BLUE_COLOR_END}"
+    read -p "You can input 'n' to disagree it:" result
+    if [ "$result" == "n" ];then
+      read -p "Please input merge request title:" title
+      mr_title=$title
+    else
+      mr_title=${mr_title:=$default_title}
+    fi
+
+    if [ -n "$mr_title" ];then
+      break
+    else
+      echo -e "${BLUE_COLOR_START}The title must not empty${BLUE_COLOR_END}"
+    fi
+  done 
+  
+  while true;do
+    read -p "Current branch is master. Please input merge request source branch:" branch 
+    mr_branch=$branch
+    if [ "$mr_branch" != "master" ] && [ -n "$mr_branch" ];then
+      break
+    else
+      echo -e "${BLUE_COLOR_START}The branch must not empty${BLUE_COLOR_END}"
+    fi
+  done 
+
+  if [ -z "$mr_project" ];then
+    read -p "Please input merge request projct id(food_mex_moblie is 314):" pid
+    mr_project=$pid
+    add_config GITLAB_PROJECT_ID $pid
+  fi
+}
+
+build_help()
+{
+  echo -e 'GMR(1)                       BSD General Commands Manual                      GMR(1)
+
+NAME
+   '${BLUE_COLOR_START}'gmr -- dartanalyzer projct and create a merge request after that'${BLUE_COLOR_END}'
+
+DESCRIPTION
+   -t|--title|--title= 
+        set merge request title. If not this option.'${BLUE_COLOR_START}' You can input title at last '${BLUE_COLOR_END}'
+        or it will get the first commit content of current branch with origin/master branch, you can use it.
+   -b|--branch|--branch=
+        branch of need merge to master.'${BLUE_COLOR_START}' Default current branch '${BLUE_COLOR_END}'
+   -l|--lables|--lables=
+        Labels for MR as a comma-separated list.'${BLUE_COLOR_START}' Default"engineering" '${BLUE_COLOR_END}'
+   -s|--squash
+        false of squash.'${BLUE_COLOR_START}' Default is true '${BLUE_COLOR_END}'
+   -p|--pid[=]|--set-pid[=]
+        set the project id of current MR | set default gitlab project id. '$BLUE_COLOR_START'Default is 341 food_mex_moblie'$BLUE_COLOR_END'
+   -u|--uid[=]|--set-uid[=]
+        set assignee user of current MR | set default gitlab user id. The mr will Assignee to him default
+   --token[=]|--set-token[=]
+        set and show gitlab token. If the input value is empty. Will only show current token
+   --dartanalyzer[=]|--set-dartanalyzer[=]
+        set and show dartanalyzer path. If the input value is empty. Will only show current dartanalyzer path
+   --host[=]|--set-host[=]
+        set and show gitlab host. If the input value is empty. Will only show current gitlab host 
+   -h|--help
+        show help
+EXAMPLE
+   '${BLUE_COLOR_START}'a full command:'${BLUE_COLOR_END}' gmr -t "(CHORE) create a mr use script" -b guosiyi/master_inbox -l "engineering,CHERRY-PICK,task" 
+   '${BLUE_COLOR_START}'a simple command:'${BLUE_COLOR_END}' gmr -t "(CHORE) create a mr use script"
+   or only '${BLUE_COLOR_START}'gmr'${BLUE_COLOR_END}' and input title after dartanalyzer complete
+  ' | less
+}
+
+parse_long_arg() {
+  case "$1" in
+    help)
+      build_help
+      exit 0
+      ;;
+    version)
+      echo -e "current vesion is: $BLUE_COLOR_START$VERSION$BLUE_COLOR_END"
+      exit 0
+      ;;
+    title)
+      mr_title="$2"
+      ;;
+    title=*)
+      val=${OPTARG#*=}
+      mr_title="$val"
+      ;;
+    branch)
+      mr_branch="$2"
+      ;;
+    branch=*)
+      val=${OPTARG#*=}
+      mr_branch="$val"
+      ;;
+    lables)
+      echo $2
+      mr_lable="$2"
+      ;;
+    lables=*)
+      val=${OPTARG#*=}
+      mr_lable="$val"
+      ;;
+    squash)
+      mr_squash="false"
+      ;;
+    set-uid|uid)
+      if [ $1 == "set-uid" ];then
+        add_config GITLAB_USER_ID $val
+        echo "current user id: $GITLAB_USER_ID"
+        exit 0
+      fi
+      mr_useid="$2"
+      ;;
+    set-uid=*|uid=*)
+      val=${OPTARG#*=}
+      opt=${OPTARG%=$val}
+      if [ $opt == "set-uid" ];then
+        add_config GITLAB_USER_ID $val
+        echo "current user id: $GITLAB_USER_ID"
+        exit 0
+      fi
+      mr_useid=$val
+      ;;
+    set-pid|pid)
+      if [ $1 == "set-pid" ];then
+        add_config GITLAB_PROJECT_ID $2
+        echo "current project id: $GITLAB_PROJECT_ID"
+        exit 0
+      fi
+      mr_project=$2
+      ;;
+    set-pid=*|pid=*)
+      val=${OPTARG#*=}
+      opt=${OPTARG%=$val}
+      if [ $opt == "set-pid" ];then
+        add_config GITLAB_PROJECT_ID $val
+        echo "current project id: $GITLAB_PROJECT_ID"
+        exit 0
+      fi
+      mr_project=$val
+      ;;
+    set-token|token)
+      add_config GITLAB_TOKEN $2
+      echo "current token: $GITLAB_TOKEN"
+      exit 0
+      ;;
+    set-token=*|token=*)
+      val=${OPTARG#*=}
+      add_config GITLAB_TOKEN $val
+      echo "current token: $GITLAB_TOKEN"
+      exit 0
+      ;;
+    set-sub_path|sub_path)
+      add_config SUB_PATH $2
+      echo "current sub_path: $SUB_PATH"
+      exit 0
+      ;;
+    set-sub_path=*|sub_path=*)
+      val=${OPTARG#*=}
+      add_config SUB_PATH $val
+      echo "current sub_path: $SUB_PATH"
+      exit 0
+      ;;
+    set-dartanalyzer|dartanalyzer)
+      add_config DART_ANALYZER $2
+      echo "current dartanalyzer path: $DART_ANALYZER"
+      exit 0
+      ;;
+    set-dartanalyzer=*|dartanalyzer=*)
+      val=${OPTARG#*=}
+      add_config DART_ANALYZER $val
+      echo "current dartanalyzer path: $DART_ANALYZER"
+      exit 0
+      ;;
+    set-host|host)
+      add_config GITLAB_HOST $2
+      echo "current gitlab host: $GITLAB_HOST"
+      exit 0
+      ;;
+    set-host=*|host=*)
+      val=${OPTARG#*=}
+      add_config GITLAB_HOST $val
+      echo "current gitlab host: $GITLAB_HOST"
+      exit 0
+      ;;
+  esac
+}
+
+#================================================
+
+init_config
+
+while getopts "t:b:l:shvnp:u:-:" arg
+do
+  case $arg in
+    t)
+      mr_title="$OPTARG"
+      ;;
+    b)
+      mr_branch="$OPTARG"
+      ;;
+    l)
+      mr_lable="$OPTARG"
+      ;;
+    s)
+      mr_squash="false"
+      ;;
+    h)
+      build_help
+      exit 0
+      ;;
+    p)
+      mr_project="$OPTARG"
+      ;;
+    u)
+      mr_useid="$OPTARG"
+      ;;
+    n)
+      mr_no_check=true
+      ;;
+    v)
+      echo -e "current vesion is: $BLUE_COLOR_START$VERSION$BLUE_COLOR_END"
+      exit 0
+      ;;
+    -)
+      val="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ))
+      parse_long_arg $OPTARG "$val"
+      ;;
+    *)
+      echo "$arg error"
+      echo "Internal error"
+      ;;
+  esac
+done
+
+case "$1" in
+  run)
+    start_pipline_with_branch $2
+    exit 0
+    ;;
+esac
+  
+
+check_config
+root_path=`git rev-parse --show-toplevel`
+
+if [ $? != "0" ];then
+  echo "please use gmr in you project directory"
+  exit 1
+fi
+
+if [ "$mr_no_check" == "true" ];then
+  create_merge_reqeust
+  exit 0
+fi
+
+cd $root_path
+if [ -n "$SUB_PATH" ];then
+  cd $SUB_PATH
+fi
+echo "flutter format check start"
+flutter format -n --set-exit-if-changed . -l 140
+
+if [ $? != "0" ];then
+  exit 1
+fi
+echo -e "${BLUE_COLOR_START}format check succeed${BLUE_COLOR_END}"
+
+echo "dartanalyzer check start"
+$DART_ANALYZER --no-hints --no-lints .
+
+if [ $? != "0" ];then
+  exit 1
+fi
+
+create_merge_reqeust
+
