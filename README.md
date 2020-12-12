@@ -1,13 +1,11 @@
 <p align="right" ><a href="./README.md">English</a>|<a href="./README-ZH.md">中文</a></p>
 
-# Why create the gmr
 - Now our CI pipline in gitlab is very solw(**every build need more than 10 minutes**) and we need wait the pipline succeed to merge our code to master. **If there are three MR. It need at least 30 minutes to merge them to master**.
-- Every CI pipline is to make sure our code **not contains compile error** and build a apk in gitlab.
 - We can use dartanalyzer instead of CI to make sure our code not contains compile error. So we **don't need to awiat ci builder**.
 - So we can create a MR after dartanalyzer and **merge it quickly** through `gmr`
+- hhhhhhhhhhh
 
 # How to install the gmr
-1. install gmr. 
    - if you not have wget. you need excute `brew install wget` first
    - if you not have jq. you need excute `brew install jq` first
 ```bash
