@@ -6,6 +6,9 @@
 - hhhhhhhhhhh
 
 # How to install the gmr
+
+哈哈哈我也改了
+1. install gmr. 
    - if you not have wget. you need excute `brew install wget` first
    - if you not have jq. you need excute `brew install jq` first
 ```bash
