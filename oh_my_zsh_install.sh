@@ -3,18 +3,8 @@
 # This script should be run via curl:
 #   sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
 # or wget:
-#   sh -c "$(wget -qO- https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
 #
 # As an alternative, you can first download the install script and run it afterwards:
-#   wget https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh
-#   sh install.sh
-#
-# You can tweak the install behavior by setting variables when running the script. For
-# example, to change the path to the Oh My Zsh repository:
-#   ZSH=~/.zsh sh install.sh
-#
-# Respects the following environment variables:
-#   ZSH     - path to the Oh My Zsh repository folder (default: $HOME/.oh-my-zsh)
 #   REPO    - name of the GitHub repo to install from (default: ohmyzsh/ohmyzsh)
 #   REMOTE  - full remote URL of the git repo to install (default: GitHub via HTTPS)
 #   BRANCH  - branch to check out immediately after install (default: master)
